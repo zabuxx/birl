@@ -5,9 +5,25 @@
 
 #include <boost/any.hpp>
 
+
+#include <boost/log/common.hpp>
+#include <boost/log/expressions.hpp>
+
+#include <boost/log/utility/setup/file.hpp>
+#include <boost/log/utility/setup/console.hpp>
+#include <boost/log/utility/setup/common_attributes.hpp>
+#include <boost/log/attributes/timer.hpp>
+#include <boost/log/attributes/named_scope.hpp>
+#include <boost/log/sources/logger.hpp>
+#include <boost/log/support/date_time.hpp>
+
+namespace logging  = boost::log;
+
 #include <errno.h>
 
 #include "options.hpp"
+
+Options options;
 
 // private members
 
@@ -25,10 +41,13 @@ string Options::make_usage_string(const string& name,
 void Options::opp_add_general_options(po::options_description& od) const
 {   
    od.add_options()("help",   "Display this message") 
-                   ("verbose,v", po::value<int>()->default_value(0)->implicit_value(1),
-                   "Verbosity level")
-                   ("config", po::value<vector<string>>()->required()->composing(),
-                    "Config file, multiple allowed");
+    ("verbose,v", po::value<int>()->default_value(0)->implicit_value(1),"Console verbosity level (0-5)")
+    ("config", po::value<vector<string>>()->composing(),"Config file, multiple allowed")
+    
+    ("logfile,l",po::value<string>(),"Logfile")
+    ("logfile-lvl,L",po::value<int>()->default_value(3),"Logfile verbosity level (0-5)")
+    
+    ;
 }
 
 void Options::opp_add_config_file(po::options_description& od) const
@@ -48,23 +67,24 @@ void Options::opp_add_config_file(po::options_description& od) const
 bool Options::read_from_config_files(po::options_description& all_options) {
 
     for(auto config_file: vm["config"].as<vector<string>>()) {
-        cout << "config_file: " << config_file  << endl;
+        LOG(info) << "Reading configfile: " << config_file;
+
         try {
             ifstream infile(config_file.c_str());
             if(!infile.is_open()) {
-                cerr << "ERROR: Cannot open " << config_file << ": "
-                     << strerror(errno) << endl;
+                LOG(fatal) << "Cannot open " << config_file << ": "
+                           << strerror(errno) << endl;
                 return false;
             }
 
             po::store(po::parse_config_file(infile, all_options),vm);
             notify(vm);
         } catch (const ifstream::failure& ex) {
-            cerr << "Exception opening/reading/closing file"
+            LOG(fatal) << "Exception opening/reading/closing file"
                  << ex.what() << endl;
             return false;
         } catch(const po::error &ex) {
-            cerr << "parse error: " << ex.what() << endl;
+            LOG(fatal) << "parse error: " << ex.what() << endl;
             return false;
         }
     }
@@ -72,7 +92,7 @@ bool Options::read_from_config_files(po::options_description& all_options) {
 }
 
 // from https://gist.github.com/gesquive/8673796
-string Options::DumpVariableMap() const {
+string Options::dump_variable_map() const {
     ostringstream oss;
 
     for (auto it = vm.begin(); it != vm.end(); it++) {
@@ -132,6 +152,62 @@ string Options::DumpVariableMap() const {
     return oss.str();
 }
 
+BOOST_LOG_ATTRIBUTE_KEYWORD(_severity, "Severity", severity_level)
+BOOST_LOG_ATTRIBUTE_KEYWORD(_timestamp, "TimeStamp", boost::posix_time::ptime)
+
+// The formatting logic for the severity level
+template< typename CharT, typename TraitsT >
+inline std::basic_ostream< CharT, TraitsT >& operator<< (
+    std::basic_ostream< CharT, TraitsT >& strm, severity_level lvl)
+{
+    static const char* const str[] =
+    {
+        "FATAL",
+        "ERROR",
+        "WARNING",
+        "INFO",
+        "DEBUG",
+        "TRACE"
+    };
+    if (static_cast< std::size_t >(lvl) < (sizeof(str) / sizeof(*str)))
+        strm << str[lvl];
+    else
+        strm << static_cast< int >(lvl);
+    return strm;
+}
+
+
+void Options::setup_logging_console() {
+    const int console_lvl = vm["verbose"].as<int>();
+    
+    logging::add_console_log(clog, 
+                             logging::keywords::format = "%TimeStamp%: %_%",
+                             logging::keywords::filter = _severity <= console_lvl
+        );
+
+    logging::add_common_attributes();
+}
+
+void Options::setup_logging_file() {
+    if(!vm.count("logfile")) {
+        LOG(debug) << "No logfiles specified";
+        return;
+    }
+
+    const string logfile  = vm["logfile"].as<string>();
+    const int logfile_lvl = vm["logfile-lvl"].as<int>();
+
+    logging::add_file_log(
+        logfile,
+        logging::keywords::filter = _severity <= logfile_lvl,
+        logging::keywords::format = logging::expressions::stream
+            << logging::expressions::format_date_time(_timestamp, "%Y-%m-%d %H:%M:%S.%f")
+            << " [" << _severity
+            << "] " << logging::expressions::message
+    );
+
+    logging::add_common_attributes();
+}
 
 //  public members
 
@@ -168,7 +244,18 @@ bool Options::parse(int argc, char** argv) {
         return false;
     }
 
-    return read_from_config_files(all_options);
+    setup_logging_console();
+    
+    if(read_from_config_files(all_options)) {
+        setup_logging_file();
+
+        LOG(trace) << "Configured options:";
+        LOG(trace) << dump_variable_map();
+
+        return true;
+    }
+
+    return false;
 }
 
 
