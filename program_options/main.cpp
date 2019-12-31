@@ -1,4 +1,5 @@
 #include <iostream>
+#include <string>
 
 #include "options.hpp"
 
@@ -9,6 +10,9 @@ int main(int ac, char* av[]) {
         cout << "Parsing options worked!" << endl;
     else
         cout << "Parsing options failed!" << endl;
+
+    if(options.count("sec2.set1"))
+        cout << "[sec2] set1=" << options.val<string>("sec2.set1") << endl;
 
     LOG(trace)   << "Trace level message";
     LOG(debug)   << "Debug level message";

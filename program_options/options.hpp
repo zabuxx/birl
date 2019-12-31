@@ -38,10 +38,16 @@ class Options {
 
         void setup_logging_console();
         void setup_logging_file();
+
     public:
         boost::log::sources::severity_logger<severity_level> logger;
 
         Options() { }
+
+        template<typename T> T val(const string& key) const {
+            return (vm.count(key)?vm[key].as<T>():T()); }
+
+        int count(const string& key) const { return vm.count(key);}
 
         bool parse(int, char**);
 

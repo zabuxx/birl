@@ -2,12 +2,14 @@
 #include <fstream>
 #include <vector>
 #include <string>
+#include <limits>
 
 #include <boost/any.hpp>
 
 
 #include <boost/log/common.hpp>
 #include <boost/log/expressions.hpp>
+#include <boost/program_options/parsers.hpp>
 
 #include <boost/log/utility/setup/file.hpp>
 #include <boost/log/utility/setup/console.hpp>
@@ -77,7 +79,9 @@ bool Options::read_from_config_files(po::options_description& all_options) {
                 return false;
             }
 
-            po::store(po::parse_config_file(infile, all_options),vm);
+            po::parsed_options parsed = po::parse_config_file(infile, all_options);
+            po::store(parsed,vm);
+
             notify(vm);
         } catch (const ifstream::failure& ex) {
             LOG(fatal) << "Exception opening/reading/closing file"
@@ -257,8 +261,3 @@ bool Options::parse(int argc, char** argv) {
 
     return false;
 }
-
-
-
-
-
